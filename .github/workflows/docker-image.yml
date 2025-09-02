@@ -1,0 +1,63 @@
+# 工作流名称
+name: Build and Push Docker Image
+
+# 触发工作流的事件
+on:
+  push:
+    branches: [ "main" ] # 当 main 分支有推送时触发
+    tags:
+      - 'v*.*.*' # 当推送版本标签时（例如 v1.0.0）触发
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write  # 推送 Docker 镜像到 GHCR 需要的权限
+      contents: read   # Checkout 代码需要的权限
+
+    steps:
+      # 步骤1：检出代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 步骤2：获取 Docker 元数据，自动生成镜像标签
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            # 为 Git 标签事件生成版本号标签，例如 v1.2.3 -> 1.2.3
+            type=semver,pattern={{version}}
+            # 为 main 分支生成 'latest' 标签
+            type=raw,value=latest,enable={{is_default_branch}}
+            # 为每次 commit 生成 SHA 标签
+            type=sha
+
+      # 步骤3：登录到 GitHub Container Registry
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 步骤4：设置 Docker Buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 步骤5：构建并推送 Docker 镜像
+      - name: Build and push Docker image
+        id: build-and-push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          # 使用元数据步骤生成的标签
+          tags: ${{ steps.meta.outputs.tags }}
+          # 使用元数据步骤生成的标签
+          labels: ${{ steps.meta.outputs.labels }}
+          # 开启构建缓存，提升后续构建速度
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
